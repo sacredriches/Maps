@@ -1,0 +1,36 @@
+rules_version = '2';
+// Falcon — Firestore rules. Firebase console → Firestore Database → Rules → paste → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() { return request.auth != null && request.auth.token.email != null; }
+    function uname() { return request.auth.token.email.lower().split('@')[0]; }
+    function userPath() { return /databases/$(database)/documents/users/$(uname()); }
+    function member() { return signedIn() && exists(userPath()); }
+    function role() { return get(userPath()).data.role; }
+    function perm(p) {
+      return member() && (role() == 'admin' ||
+        (role() != 'ops' && get(/databases/$(database)/documents/groups/$(role())).data.perms.get(p, false) == true));
+    }
+    function firstAdmin() { return signedIn() && uname() in ['flxadmin']; }
+
+    match /countries/{id} {
+      allow read: if member();
+      allow write: if perm('method') || perm('text') || perm('docs') || perm('nofly') || perm('settings') || perm('accounts');
+    }
+    match /config/{doc} {
+      allow read: if member();
+      allow write: if perm('settings') || (doc == 'nofly' && perm('nofly'));
+    }
+    match /groups/{id} {
+      allow read: if member();
+      allow write: if perm('settings');
+    }
+    match /users/{uid} {
+      allow read: if member() || (signedIn() && uid == uname());
+      allow create: if perm('accounts') || (firstAdmin() && uid == uname() && request.resource.data.role == 'admin');
+      allow delete: if perm('accounts');
+      allow update: if perm('accounts') ||
+        (signedIn() && uid == uname() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['last']));
+    }
+  }
+}
