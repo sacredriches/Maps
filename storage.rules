@@ -1,0 +1,18 @@
+rules_version = '2';
+// Falcon — Storage rules (documents). Firebase console → Storage → Rules → Publish.
+service firebase.storage {
+  match /b/{bucket}/o {
+    function signedIn() { return request.auth != null; }
+    function upath() { return /databases/(default)/documents/users/$(request.auth.token.email.lower().split('@')[0]); }
+    function member() { return signedIn() && firestore.exists(upath()); }
+    function role() { return firestore.get(upath()).data.role; }
+    function canDocs() {
+      return member() && (role() == 'admin' ||
+        (role() != 'ops' && firestore.get(/databases/(default)/documents/groups/$(role())).data.perms.docs == true));
+    }
+    match /docs/{id} {
+      allow read: if member();
+      allow write: if canDocs() && (request.resource == null || request.resource.size < 25 * 1024 * 1024);
+    }
+  }
+}
